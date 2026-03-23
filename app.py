@@ -1,121 +1,45 @@
 from flask import Flask, request, jsonify
 import requests
-import urllib.parse
-from datetime import datetime
-import json
-import re
-import os
 
 app = Flask(__name__)
 
-# --- إعدادات واتساب محجوب أونلاين ---
-TEXTMEBOT_API_KEY = "CWEMDRmhtq4e"
+# إعدادات البوت من TextMeBot
+TEXTME_BOT_KEY = "CWEMDRmhtq4e" 
 
-# قاموس ترجمة المدن
-CITY_MAP = {
-    "67b9e47c7e7fbc758fd244ea": "الحديدة",
-    "67b9e47c7e7fbc758fd244eb": "عدن",
-    "67b9e47c7e7fbc758fd244ec": "صنعاء",
-    "67b9e47c7e7fbc758fd244ed": "تعز",
-    "67b9e47c7e7fbc758fd244ee": "حضرموت"
-}
-
-def smart_parse(data):
-    if isinstance(data, dict): return data
-    try: return json.loads(data)
-    except: return {}
-
-def get_real_text(val, field_name=""):
-    txt = str(val).strip()
-    if not txt or txt.lower() in ['none', 'null', '']: return None
-    if field_name == "city" and txt in CITY_MAP: return CITY_MAP[txt]
-    if len(txt) >= 15 and re.match(r'^[a-f0-9]+$', txt): return None
-    return txt
-
-@app.route('/webhook', methods=['POST', 'GET', 'HEAD'])
-def mahjoub_webhook():
-    if request.method in ['GET', 'HEAD']: return "OK", 200
+def send_whatsapp(phone, message):
+    url = f"https://api.textmebot.com/send.php?recipient={phone}&apikey={TEXTME_BOT_KEY}&text={message}"
     try:
-        raw_data = request.get_data(as_text=True)
-        payload = smart_parse(raw_data)
-        order = smart_parse(payload.get('data', payload))
-        customer = smart_parse(order.get('salesLead', {}))
+        response = requests.get(url)
+        return response.status_code
+    except:
+        return 500
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    data = request.json
+    # استخراج نوع الحدث (نبحث عن الكلمة سواء كانت بـ topic أو بدون)
+    event = data.get('event', '')
+    order_data = data.get('data', {})
+    
+    # استخراج بيانات العميل والطلب
+    lead = order_data.get('salesLead', {})
+    phone = lead.get('phone1', '').replace('+', '')
+    name = lead.get('firstName', 'عميلنا العزيز')
+    order_no = order_data.get('handel', 'غير معروف')
+    total = order_data.get('totalPriceWithTax', 0)
+    status_title = order_data.get('status', {}).get('title', 'قيد المعالجة')
+
+    # رسالة عند إنشاء طلب جديد (الفاتورة المبسطة)
+    if "order.created" in event or "order.placed" in event:
+        msg = f"مرحباً {name} 👋\nشكراً لطلبك من *محجوب أونلاين* 🛍️\n\nرقم طلبك: #{order_no}\nالإجمالي: {total} ريال\nالحالة: {status_title}\n\nسيتم إشعارك فور تحديث حالة الطلب. شكراً لثقتك بنا! ✨"
+        send_whatsapp(phone, msg)
         
-        event = payload.get('event', 'order.created')
-        order_id = order.get('handel', '0000')
-        phone = str(customer.get('phone1', '')).replace('+', '').replace(' ', '')
-        tracking_link = f"https://mahjoub.online/customer/thank-you/{order_id}"
-        full_time = datetime.now().strftime("%Y/%m/%d - %H:%M:%S")
+    # رسالة عند تحديث الحالة من الإدارة
+    elif "order.updated" in event:
+        msg = f"عزيزي {name} 👋\nتم تحديث حالة طلبك رقم #{order_no}\n\nالحالة الجديدة: *{status_title}* ✅\n\nشكراً لتسوقك من سوقك الذكي."
+        send_whatsapp(phone, msg)
 
-        status_info = smart_parse(order.get('status', {}))
-        status_title = status_info.get('title', 'قيد الإنتظار')
-        is_paid = order.get('isPaid', False)
-        pay_text = "✅ *مدفوع*" if is_paid else "❌ *غير مدفوع*"
-        
-        extra_note = ""
-        st = status_title
-        
-        if not is_paid and not any(x in st for x in ["إلغاء", "ملغي", "مرتجع"]):
-            extra_note = "\n⚠️ *يرجى تزويدنا بصورة القسيمة المالية (إيصال السداد) هنا لمتابعة تنفيذ طلبكم.*"
-        elif any(x in st for x in ["إلغاء", "ملغي"]):
-            extra_note = "\n🚫 *إشعار:* نأسف لإبلاغكم بأنه تم إلغاء الطلب."
-        elif any(x in st for x in ["إرجاع", "استرداد", "مرتجع"]):
-            extra_note = "\n💰 *ملاحظة:* سيتم استرداد المبلغ إلى حسابكم خلال 48 ساعة عمل."
-        elif any(x in st for x in ["شحن", "تم الإرسال"]):
-            extra_note = "\n🚚 *إشعار:* تم تسليم طلبكم لشركة الشحن."
+    return jsonify({"status": "success"}), 200
 
-        divider = "╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼"
-        footer = "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n*نظام محجوب أونلاين | سوقك الذكي*"
-
-        if event == "order.created":
-            country = get_real_text(customer.get('countryName')) or "اليمن"
-            city = get_real_text(customer.get('cityName')) or get_real_text(customer.get('city'), "city")
-            district = get_real_text(customer.get('district')) or get_real_text(customer.get('address1'))
-            street = get_real_text(customer.get('street')) or get_real_text(customer.get('address2'))
-            addr_parts = [p for p in [country, city, district, street] if p]
-            full_address = " - ".join(addr_parts)
-            
-            msg = (
-                "✨ *إشعار نظام: تم إنشاء طلب جديد* ✨\n\n"
-                f"🧾 *فاتورة رقم:* `{order_id}`\n"
-                f"{divider}\n"
-                f"👤 *العميل:* {customer.get('firstName', '')} {customer.get('lastName', '')}\n"
-                f"📍 *موقع التوصيل:* {full_address}\n"
-                f"{divider}\n"
-                f"💰 *الضريبة:* `{order.get('taxAmount', 0)}` ريال\n"
-                f"💵 *الإجمالي النهائي:* `{order.get('priceWithShipping', 0)}` ريال\n"
-                f"{divider}\n"
-                f"🚚 *حالة المنتج:* 【 {status_title} 】\n"
-                f"📝 *حالة الدفع:* {pay_text}"
-                f"{extra_note}\n"
-                f"{divider}\n"
-                f"🕒 *التوقيت:* `{full_time}`\n"
-                f"🔗 *رابط التتبع:* {tracking_link}\n\n"
-                f"{footer}"
-            )
-        else:
-            msg = (
-                f"🔄 *إشعار نظام: تحديث الطلب*\n"
-                f"{divider}\n"
-                f"📦 *رقم المنتج:* `{order_id}`\n"
-                f"🚚 *حالة المنتج:* 【 {status_title} 】\n"
-                f"📝 *حالة الدفع:* {pay_text}"
-                f"{extra_note}\n"
-                f"{divider}\n"
-                f"🕒 *التوقيت:* `{full_time}`\n"
-                f"🔗 *تتبع:* {tracking_link}\n\n"
-                f"{footer}"
-            )
-
-        if phone and len(phone) > 5:
-            api_url = f"https://api.textmebot.com/send.php?recipient={phone}&apikey={TEXTMEBOT_API_KEY}&text={urllib.parse.quote(msg)}"
-            requests.get(api_url, timeout=10)
-            
-        return jsonify({"status": "success"}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 200
-
-if __name__ == "__main__":
-    # تشغيل السيرفر على المنفذ المطلوب للاستضافة
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
