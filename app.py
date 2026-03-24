@@ -1,113 +1,83 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 import requests
 import urllib.parse
-from datetime import datetime, timedelta  # أضفنا timedelta هنا
+from datetime import datetime, timedelta
 import json
-import re
+import pdfkit # المكتبة المسؤولة عن تحويل HTML لـ PDF
 
 app = Flask(__name__)
 
-# --- إعدادات واتساب محجوب أونلاين ---
+# إعدادات المسارات والروابط
+BASE_URL = "https://mahjoub-bot.onrender.com"
 TEXTMEBOT_API_KEY = "CWEMDRmhtq4e"
 
-def smart_parse(data):
-    if isinstance(data, dict): return data
-    try: return json.loads(data)
-    except: return {}
+# دالة توليد الفاتورة PDF بناءً على تصميمك
+def generate_pdf_invoice(order_data):
+    # هنا نضع قالب الـ HTML الذي أرفقته مع استبدال البيانات بمتغيرات
+    html_template = f"""
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            /* نضع هنا كل الـ CSS الذي أرفقته في رسالتك */
+            :root {{ --royal-purple: #4b0082; --gold-accent: #d4af37; }}
+            body {{ font-family: 'Arial'; padding: 20px; }}
+            .invoice-card {{ width: 100%; background: white; padding: 40px; border: 1px solid #eee; }}
+            .status-bar {{ background: var(--royal-purple); color: white; padding: 10px; text-align: center; border-radius: 8px; }}
+            /* ... بقية التنسيقات ... */
+        </style>
+    </head>
+    <body>
+        <div class="invoice-card">
+            <h1>محجوب أونلاين</h1>
+            <div class="status-bar">حالة الفاتورة: تم الإيداع والتسليم ✅</div>
+            <p>اسم العميل: {order_data['customer_name']}</p>
+            <p>رقم الطلب: {order_data['order_id']}</p>
+            <p>الإجمالي: {order_data['total_price']} ريال</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    options = {{'enable-local-file-access': None}}
+    filename = f"invoice_{order_data['order_id']}.pdf"
+    
+    # تحويل النص (HTML) إلى ملف PDF
+    pdfkit.from_string(html_template, filename, options=options)
+    return filename
 
-def get_real_text(val):
-    txt = str(val).strip()
-    if not txt or txt.lower() in ['none', 'null', '', 'false']: return None
-    if len(txt) >= 20 and re.match(r'^[a-f0-9]+$', txt): return None
-    return txt
-
-@app.route('/webhook', methods=['POST', 'GET', 'HEAD'])
-def mahjoub_auto_receipt_v38():
-    if request.method in ['GET', 'HEAD']: return "OK", 200
+@app.route('/webhook', methods=['POST'])
+def handle_webhook():
     try:
-        raw_data = request.get_data(as_text=True)
-        payload = smart_parse(raw_data)
-        order = smart_parse(payload.get('data', payload))
-        customer = smart_parse(order.get('salesLead', {}))
+        data = request.json
+        order = data.get('data', {{}})
+        customer = order.get('salesLead', {{}})
         
-        event = payload.get('event', 'order.created')
-        order_id = order.get('handel', '0000')
-        phone = str(customer.get('phone1', '')).replace('+', '').replace(' ', '')
-        tracking_link = f"https://mahjoub.online/customer/thank-you/{order_id}"
-        
-        # --- تعديل التوقيت ليكون بتوقيت اليمن (GMT+3) ---
-        yemen_time = datetime.utcnow() + timedelta(hours=3)
-        full_time = yemen_time.strftime("%Y/%m/%d - %I:%M %p") 
-        # ملاحظة: %I:%M %p ستعرض الوقت بنظام 12 ساعة (مثلاً 01:36 PM)
-        
-        status_info = smart_parse(order.get('status', {}))
-        status_title = status_info.get('title', 'قيد الإنتظار')
-        is_paid = order.get('isPaid', False)
-        pay_text = "✅ *مدفوع*" if is_paid else "❌ *غير مدفوع*"
-        
-        extra_note = ""
-        st = status_title
-        
-        if not is_paid and not any(x in st for x in ["إلغاء", "ملغي", "مرتجع"]):
-            extra_note = "\n⚠️ *يرجى تزويدنا بصورة القسيمة المالية (إيصال السداد) هنا لمتابعة تنفيذ طلبكم.*"
-        elif any(x in st for x in ["إلغاء", "ملغي"]):
-            extra_note = "\n🚫 *إشعار:* نأسف لإبلاغكم بأنه تم إلغاء الطلب."
-        elif any(x in st for x in ["شحن", "تم الإرسال"]):
-            extra_note = "\n🚚 *إشعار:* تم تسليم طلبكم لشركة الشحن، وهو في الطريق إليكم."
+        # تجهيز بيانات الفاتورة من الـ Webhook
+        invoice_info = {{
+            'order_id': order.get('handel', '0000'),
+            'customer_name': f"{{customer.get('firstName', '')}} {{customer.get('lastName', '')}}",
+            'total_price': order.get('totalPrice', 0),
+            'phone': str(customer.get('phone1', '')).replace('+', '')
+        }}
 
-        divider = "╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼"
-        footer = "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n*نظام محجوب أونلاين | سوقك الذكي*"
+        # 1. توليد الملف
+        pdf_file = generate_pdf_invoice(invoice_info)
 
-        if event == "order.created":
-            country = get_real_text(customer.get('countryName'))
-            city = get_real_text(customer.get('cityName'))
-            district = get_real_text(customer.get('district')) or get_real_text(customer.get('address1'))
-            street = get_real_text(customer.get('street')) or get_real_text(customer.get('address2'))
-            
-            addr_parts = [p for p in [country, city, district, street] if p]
-            full_address = " - ".join(addr_parts) if addr_parts else "اليمن"
-            
-            msg = (
-                "✨ *إشعار نظام: تم إنشاء طلب جديد* ✨\n\n"
-                f"🧾 *فاتورة رقم:* `{order_id}`\n"
-                f"{divider}\n"
-                f"👤 *العميل:* {customer.get('firstName', '')} {customer.get('lastName', '')}\n"
-                f"📍 *موقع التوصيل:* {full_address}\n"
-                f"{divider}\n"
-                f"💰 *الضريبة:* `{order.get('taxAmount', 0)}` ريال\n"
-                f"💵 *الإجمالي النهائي:* `{order.get('priceWithShipping', 0)}` ريال\n"
-                f"{divider}\n"
-                f"🚚 *حالة المنتج:* 【 {status_title} 】\n"
-                f"📝 *حالة الدفع:* {pay_text}"
-                f"{extra_note}\n"
-                f"{divider}\n"
-                f"🕒 *توقيت الطلب:* `{full_time}`\n"
-                f"🔗 *رابط التتبع:* {tracking_link}\n\n"
-                f"{footer}"
-            )
-        else:
-            msg = (
-                "🔄 *إشعار نظام: تحديث الطلب*\n"
-                f"{divider}\n"
-                f"📦 *رقم المنتج:* `{order_id}`\n"
-                f"🚚 *حالة المنتج:* 【 {status_title} 】\n"
-                f"📝 *حالة الدفع:* {pay_text}"
-                f"{extra_note}\n"
-                f"{divider}\n"
-                f"🕒 *وقت التحديث:* `{full_time}`\n"
-                f"🔗 *تتبع:* {tracking_link}\n\n"
-                f"{footer}"
-            )
+        # 2. إرسال الرابط للعميل عبر واتساب
+        pdf_link = f"{{BASE_URL}}/download/{{pdf_file}}"
+        whatsapp_url = f"https://api.textmebot.com/send.php?recipient={{invoice_info['phone']}}&apikey={{TEXTMEBOT_API_KEY}}&document={{urllib.parse.quote(pdf_link)}}"
+        requests.get(whatsapp_url)
 
-        if phone and len(phone) > 5:
-            api_url = f"https://api.textmebot.com/send.php?recipient={phone}&apikey={TEXTMEBOT_API_KEY}&text={urllib.parse.quote(msg)}"
-            requests.get(api_url, timeout=10)
-
-        return jsonify({"status": "success"}), 200
+        return jsonify({{"status": "success"}}), 200
     except Exception as e:
-        return jsonify({"status": "error"}), 200
+        return jsonify({{"status": "error", "message": str(e)}}), 200
+
+@app.route('/download/<filename>')
+def download(filename):
+    return send_from_directory(os.getcwd(), filename)
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=5000)
