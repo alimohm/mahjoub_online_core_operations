@@ -1,60 +1,45 @@
 import os
 from flask import Flask, request, jsonify
 import requests
-import urllib.parse
 
 app = Flask(__name__)
 
-# جلب المفاتيح من Render
-MAHJOUB_KEY = os.environ.get("MAHJOUB_ONLINE_KEY")
-TEXTMEBOT_KEY = os.environ.get("TEXTMEBOT_KEY")
-GRAPHQL_URL = "https://mahjoub.online/admin/graphql"
-
-def get_order_data(order_id):
-    query = """
-    query GetOrder($id: ID!) {
-      order(id: $id) {
-        handle
-        priceWithShipping
-        salesLead { firstName phone1 }
-      }
-    }
-    """
-    headers = {"Authorization": f"Bearer {MAHJOUB_KEY}", "Content-Type": "application/json"}
-    try:
-        response = requests.post(GRAPHQL_URL, json={'query': query, 'variables': {'id': order_id}}, headers=headers, timeout=12)
-        return response.json().get('data', {}).get('order', {})
-    except:
-        return None
+# سحب المفاتيح من بيئة رندر
+TEXTMEBOT_KEY = os.environ.get('TEXTMEBOT_KEY')
+QMR_KEY = os.environ.get('MAHJOUB_ONLINE_KEY')
 
 @app.route('/webhook', methods=['POST', 'GET', 'HEAD'])
-def mahjoub_core_webhook():
-    # هذا السطر يمنع الـ 404 عند الفحص البسيط
-    if request.method in ['GET', 'HEAD']: return "SYSTEM_ACTIVE", 200
+def webhook():
+    if request.method in ['GET', 'HEAD']:
+        return "OK", 200
+
+    data = request.json
+    print(f"--- طلب جديد مستلم ---")
+    
+    # استخراج رقم الهاتف والاسم
+    customer = data.get('data', {}).get('customer', {})
+    phone = str(customer.get('phone1', '')).replace('+', '').replace(' ', '')
+    name = customer.get('name', 'عميلنا العزيز')
+    order_id = data.get('data', {}).get('handle', 'بدون رقم')
+    status = data.get('data', {}).get('status_name', 'محدثة')
+
+    if not phone or phone == 'None':
+        print("خطأ: لم يتم العثور على رقم هاتف")
+        return "No Phone", 200
+
+    # تجهيز رسالة محجوب أونلاين الملكية
+    msg = f"مرحباً {name} ✨\nتم تحديث حالة طلبك رقم ({order_id}) إلى: *{status}*\nشكراً لاختيارك محجوب أونلاين - سوقك الذكي."
+    
+    # إرسال عبر TextMeBot
+    whatsapp_url = f"https://api.textmebot.com/send.php?recipient={phone}&apikey={TEXTMEBOT_KEY}&text={msg}"
     
     try:
-        payload = request.get_json()
-        # سحب الـ ID من البيانات التي أرسلتها في الـ Payload
-        order_internal_id = payload.get('data', {}).get('_id') 
-        
-        order = get_order_data(order_internal_id)
-        
-        if order and order.get('salesLead'):
-            customer_name = order['salesLead']['firstName']
-            phone = str(order['salesLead']['phone1']).replace('+', '').replace(' ', '')
-            order_no = order['handle']
-            total = order['priceWithShipping']
-            
-            msg = f"مرحباً {customer_name}، تم تحديث طلبك رقم {order_no} في محجوب أونلاين. الإجمالي: {total} ريال. شكراً لثقتكم."
-            
-            if phone and len(phone) > 5:
-                api_url = f"https://api.textmebot.com/send.php?recipient={phone}&apikey={TEXTMEBOT_KEY}&text={urllib.parse.quote(msg)}"
-                requests.get(api_url, timeout=10)
-        
-        return jsonify({"status": "success"}), 200
+        response = requests.get(whatsapp_url)
+        print(f"تم الإرسال للرقم {phone}. رد السيرفر: {response.text}")
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 200
+        print(f"فشل الإرسال: {str(e)}")
+
+    return "Done", 200
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=10000)
