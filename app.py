@@ -9,7 +9,7 @@ import re
 app = Flask(__name__)
 
 # --- إعدادات محجوب أونلاين ---
-# استبدل هذا بالرابط الخاص بك في Render
+# رابط سيرفرك في Render (تأكد أنه يطابق اسم الخدمة لديك)
 BASE_URL = "https://mahjoub-bot.onrender.com" 
 
 def smart_parse(data):
@@ -22,14 +22,15 @@ def get_real_text(val):
     if not txt or txt.lower() in ['none', 'null', '', 'false']: return None
     return txt
 
-# --- بوابة تحميل ملف test.pdf من GitHub ---
+# --- بوابة تحميل ملف test.pdf من GitHub (هذا ما يجعل الرابط يعمل) ---
 @app.route('/download/<path:filename>')
 def download_file(filename):
+    # يقوم السيرفر هنا بالبحث عن الملف في مجلد المشروع وإرساله
     return send_from_directory(os.getcwd(), filename)
 
 @app.route('/')
 def home():
-    return "سيرفر محجوب أونلاين يعمل بنجاح", 200
+    return "سيرفر محجوب أونلاين يعمل بنجاح - بانتظار الطلبات", 200
 
 @app.route('/webhook', methods=['POST', 'GET', 'HEAD'])
 def mahjoub_auto_receipt_v38():
@@ -57,7 +58,7 @@ def mahjoub_auto_receipt_v38():
         footer = "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n*نظام محجوب أونلاين | سوقك الذكي*"
 
         if event == "order.created":
-            # رابط الفاتورة المباشر من سيرفرك
+            # رابط الفاتورة الذي سيضغط عليه العميل
             pdf_link = f"{BASE_URL}/download/test.pdf"
             
             msg = (
@@ -71,16 +72,18 @@ def mahjoub_auto_receipt_v38():
                 f"📝 *الدفع:* {pay_text}\n"
                 f"🕒 *الوقت:* `{full_time}`\n"
                 f"{divider}\n"
-                f"📄 *رابط تحميل الفاتورة PDF:*\n{pdf_link}\n\n"
+                f"📄 *لتحميل فاتورتك بصيغة PDF اضغط هنا:*\n{pdf_link}\n\n"
                 f"{footer}"
             )
             
-            # سجل الرسالة في Render Logs للتأكد من المحتوى
-            print(f"--- رسالة جاهزة للإرسال إلى {phone} ---\n{msg}")
+            # --- تنبيه هام ---
+            # هنا يجب أن تضع كود خدمة الإرسال البديلة التي اخترتها.
+            # إذا لم تضع خدمة بديلة، السيرفر سيستلم البيانات لكنه لن يرسل للواتساب.
+            print(f"تم تجهيز الرسالة لـ {phone}:\n{msg}")
 
         return jsonify({"status": "success"}), 200
     except Exception as e:
-        print(f"خطأ في السيرفر: {e}")
+        print(f"خطأ: {e}")
         return jsonify({"status": "error"}), 200
 
 if __name__ == '__main__':
