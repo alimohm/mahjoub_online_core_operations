@@ -15,7 +15,7 @@ def smart_parse(data):
     except: return {}
 
 @app.route('/webhook', methods=['POST', 'GET', 'HEAD'])
-def mahjoub_precision_system():
+def mahjoub_perfect_flow():
     if request.method in ['GET', 'HEAD']: return "OK", 200
     
     try:
@@ -23,22 +23,15 @@ def mahjoub_precision_system():
         order = smart_parse(payload.get('data', payload))
         customer = smart_parse(order.get('customer', order.get('salesLead', {})))
         
-        # المعرفات الأساسية
+        # الرقم المتغير (مثل 1000000930)
         order_handle = str(order.get('handle') or "0000")
-        # المعرف الطويل للفاتورة (من قاعدة البيانات)
-        order_id = str(order.get('_id') or "") 
         
         phone = customer.get('phone1') or customer.get('phone2') or order.get('phone')
         phone = str(phone).replace('+', '').replace(' ', '') if phone else ""
         if phone and not phone.startswith('967'): phone = '967' + phone
 
-        # --- الفصل بين الروابط بدقة ---
-        # 1. رابط التتبع (لحالة المنتج فقط)
+        # --- الرابط المضمون الذي يفتح للعملاء ---
         tracking_link = f"https://mahjoub.online/customer/thank-you/{order_handle}"
-        
-        # 2. رابط الفاتورة (التي تحتوي على اسم العميل والبيانات الكاملة)
-        # ملاحظة: استخدمنا المعرف الداخلي لضمان فتح صفحة الفاتورة المصممة
-        invoice_link = f"https://mahjoub.online/orders/invoice/{order_id}"
         
         yemen_time = datetime.utcnow() + timedelta(hours=3)
         full_time = yemen_time.strftime("%Y/%m/%d - %I:%M %p") 
@@ -50,9 +43,9 @@ def mahjoub_precision_system():
         divider = "╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼"
         footer = "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n*نظام محجوب أونلاين | سوقك الذكي*"
 
-        # صياغة الرسالة مع الفصل الواضح بين التتبع والفاتورة
+        # صياغة الرسالة لتوجه العميل لكيفية استخراج الفاتورة
         msg = (
-            "✨ *إشعار نظام: تم إنشاء طلب جديد* ✨\n\n"
+            "✨ *إشعار نظام: تم إنشاء طلب جديد بنجاح* ✨\n\n"
             f"🧾 *فاتورة رقم:* `{order_handle}`\n"
             f"{divider}\n"
             f"👤 *العميل:* {customer.get('name', 'عميلنا العزيز')}\n"
@@ -65,9 +58,8 @@ def mahjoub_precision_system():
             f"📝 *حالة الدفع:* {pay_text}\n"
             f"{divider}\n"
             f"🕒 *توقيت الطلب:* `{full_time}`\n\n"
-            f"🔗 *رابط تتبع حالة الشحن:* \n{tracking_link}\n\n"
-            f"📄 *رابط عرض الفاتورة التفصيلية:* \n{invoice_link}\n\n"
-            f"⚠️ *يرجى إرسال صورة إيصال السداد هنا في حال كان الطلب غير مدفوع.*\n"
+            f"🔗 *لتتبع حالة المنتج وتحميل فاتورتك التفصيلية:* \n{tracking_link}\n\n"
+            f"💡 *ملاحظة:* لتحميل الفاتورة PDF التي تحتوي على بياناتك الكاملة، يرجى الضغط على زر (طباعة الفاتورة) داخل الرابط أعلاه.\n\n"
             f"{footer}"
         )
 
