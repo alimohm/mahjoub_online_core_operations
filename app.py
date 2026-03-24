@@ -11,25 +11,16 @@ app = Flask(__name__)
 # --- إعدادات واتساب محجوب أونلاين ---
 TEXTMEBOT_API_KEY = "CWEMDRmhtq4e"
 
-# قاموس ترجمة المدن
-CITY_MAP = {
-    "67b9e47c7e7fbc758fd244ea": "الحديدة",
-    "67b9e47c7e7fbc758fd244eb": "عدن",
-    "67b9e47c7e7fbc758fd244ec": "صنعاء",
-    "67b9e47c7e7fbc758fd244ed": "تعز",
-    "67b9e47c7e7fbc758fd244ee": "حضرموت"
-}
-
 def smart_parse(data):
     if isinstance(data, dict): return data
     try: return json.loads(data)
     except: return {}
 
-def get_real_text(val, field_name=""):
+def get_real_text(val):
     txt = str(val).strip()
-    if not txt or txt.lower() in ['none', 'null', '']: return None
-    if field_name == "city" and txt in CITY_MAP: return CITY_MAP[txt]
-    if len(txt) >= 15 and re.match(r'^[a-f0-9]+$', txt): return None
+    # استبعاد القيم الفارغة أو القيم البرمجية (IDs) الطويلة جداً
+    if not txt or txt.lower() in ['none', 'null', '', 'false']: return None
+    if len(txt) >= 20 and re.match(r'^[a-f0-9]+$', txt): return None
     return txt
 
 @app.route('/webhook', methods=['POST', 'GET', 'HEAD'])
@@ -58,22 +49,23 @@ def mahjoub_auto_receipt_v38():
         if not is_paid and not any(x in st for x in ["إلغاء", "ملغي", "مرتجع"]):
             extra_note = "\n⚠️ *يرجى تزويدنا بصورة القسيمة المالية (إيصال السداد) هنا لمتابعة تنفيذ طلبكم.*"
         elif any(x in st for x in ["إلغاء", "ملغي"]):
-            extra_note = "\n🚫 *إشعار:* نأسف لإبلاغكم بأنه تم إلغاء الطلب. لمزيد من المعلومات يرجى التواصل معنا."
-        elif any(x in st for x in ["إرجاع", "استرداد", "مرتجع"]):
-            extra_note = "\n💰 *ملاحظة:* سيتم استرداد المبلغ إلى حسابكم خلال 48 ساعة عمل." if is_paid else "\n💰 *ملاحظة:* تم اعتماد الاسترجاع في حسابكم لدينا."
+            extra_note = "\n🚫 *إشعار:* نأسف لإبلاغكم بأنه تم إلغاء الطلب."
         elif any(x in st for x in ["شحن", "تم الإرسال"]):
-            extra_note = "\n🚚 *إشعار:* تم تسليم طلبكم لشركة الشحن، وهو في الطريق إليكم الآن."
+            extra_note = "\n🚚 *إشعار:* تم تسليم طلبكم لشركة الشحن، وهو في الطريق إليكم."
 
         divider = "╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼"
         footer = "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n*نظام محجوب أونلاين | سوقك الذكي*"
 
         if event == "order.created":
-            country = get_real_text(customer.get('countryName')) or "اليمن"
-            city = get_real_text(customer.get('cityName')) or get_real_text(customer.get('city'), "city")
+            # --- سحب العنوان أوتوماتيكياً بالكامل ---
+            country = get_real_text(customer.get('countryName'))
+            city = get_real_text(customer.get('cityName'))
             district = get_real_text(customer.get('district')) or get_real_text(customer.get('address1'))
             street = get_real_text(customer.get('street')) or get_real_text(customer.get('address2'))
+            
+            # دمج الأجزاء المتوفرة فقط
             addr_parts = [p for p in [country, city, district, street] if p]
-            full_address = " - ".join(addr_parts)
+            full_address = " - ".join(addr_parts) if addr_parts else "اليمن (سيتم تحديد الموقع بدقة عند التواصل)"
             
             msg = (
                 "✨ *إشعار نظام: تم إنشاء طلب جديد* ✨\n\n"
@@ -94,9 +86,8 @@ def mahjoub_auto_receipt_v38():
                 f"{footer}"
             )
         else:
-            header = "🔄 *إشعار نظام: تحديث الطلب*"
             msg = (
-                f"{header}\n"
+                "🔄 *إشعار نظام: تحديث الطلب*\n"
                 f"{divider}\n"
                 f"📦 *رقم المنتج:* `{order_id}`\n"
                 f"🚚 *حالة المنتج:* 【 {status_title} 】\n"
