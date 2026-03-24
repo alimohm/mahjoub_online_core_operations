@@ -47,36 +47,27 @@ def mahjoub_auto_receipt_v38():
         tracking_link = f"https://mahjoub.online/customer/thank-you/{order_id}"
         full_time = datetime.now().strftime("%Y/%m/%d - %H:%M:%S")
 
-        # بيانات الحالة والدفع
         status_info = smart_parse(order.get('status', {}))
         status_title = status_info.get('title', 'قيد الإنتظار')
         is_paid = order.get('isPaid', False)
         pay_text = "✅ *مدفوع*" if is_paid else "❌ *غير مدفوع*"
         
-        # --- [محرك الحالات والمنطق المالي] ---
         extra_note = ""
         st = status_title
         
-        # الحالة الأولى: طلب جديد وغير مدفوع (أولوية قصوى)
         if not is_paid and not any(x in st for x in ["إلغاء", "ملغي", "مرتجع"]):
             extra_note = "\n⚠️ *يرجى تزويدنا بصورة القسيمة المالية (إيصال السداد) هنا لمتابعة تنفيذ طلبكم.*"
-        
-        # الحالات الأخرى (عند التحديث)
         elif any(x in st for x in ["إلغاء", "ملغي"]):
             extra_note = "\n🚫 *إشعار:* نأسف لإبلاغكم بأنه تم إلغاء الطلب. لمزيد من المعلومات يرجى التواصل معنا."
-        
         elif any(x in st for x in ["إرجاع", "استرداد", "مرتجع"]):
             extra_note = "\n💰 *ملاحظة:* سيتم استرداد المبلغ إلى حسابكم خلال 48 ساعة عمل." if is_paid else "\n💰 *ملاحظة:* تم اعتماد الاسترجاع في حسابكم لدينا."
-        
         elif any(x in st for x in ["شحن", "تم الإرسال"]):
             extra_note = "\n🚚 *إشعار:* تم تسليم طلبكم لشركة الشحن، وهو في الطريق إليكم الآن."
 
-        # تنسيق النظام
         divider = "╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼"
         footer = "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n*نظام محجوب أونلاين | سوقك الذكي*"
 
         if event == "order.created":
-            # نسخة الفاتورة الكاملة
             country = get_real_text(customer.get('countryName')) or "اليمن"
             city = get_real_text(customer.get('cityName')) or get_real_text(customer.get('city'), "city")
             district = get_real_text(customer.get('district')) or get_real_text(customer.get('address1'))
@@ -103,7 +94,6 @@ def mahjoub_auto_receipt_v38():
                 f"{footer}"
             )
         else:
-            # نسخة التحديث المختصرة
             header = "🔄 *إشعار نظام: تحديث الطلب*"
             msg = (
                 f"{header}\n"
@@ -126,8 +116,6 @@ def mahjoub_auto_receipt_v38():
     except Exception as e:
         return jsonify({"status": "error"}), 200
 
-# --- التعديل المطلوب للتشغيل على Render ---
 if __name__ == '__main__':
-    # جلب المنفذ تلقائياً من إعدادات Render
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port)
