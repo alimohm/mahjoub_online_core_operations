@@ -7,7 +7,6 @@ import json
 
 app = Flask(__name__)
 
-# --- الإعدادات ---
 TEXTMEBOT_API_KEY = "CWEMDRmhtq4e"
 
 def smart_parse(data):
@@ -16,7 +15,7 @@ def smart_parse(data):
     except: return {}
 
 @app.route('/webhook', methods=['POST', 'GET', 'HEAD'])
-def mahjoub_final_v39():
+def mahjoub_final_v41():
     if request.method in ['GET', 'HEAD']: return "OK", 200
     
     try:
@@ -24,20 +23,20 @@ def mahjoub_final_v39():
         order = smart_parse(payload.get('data', payload))
         customer = smart_parse(order.get('customer', order.get('salesLead', {})))
         
-        event = payload.get('event', 'order.created')
-        # التأكد من جلب رقم الفاتورة الصحيح (1000000xxx)
-        order_id = str(order.get('handle') or order.get('handel') or "0000")
+        # استخراج المعرف الفريد (الموجود في الرابط الذي أرسلته)
+        order_internal_id = order.get('_id') 
+        # رقم الطلب الظاهري (1000000xxx)
+        order_handle = str(order.get('handle') or order.get('handel') or "0000")
         
-        # جلب رقم الهاتف
         phone = customer.get('phone1') or customer.get('phone2') or order.get('phone')
         phone = str(phone).replace('+', '').replace(' ', '') if phone else ""
         if phone and not phone.startswith('967'): phone = '967' + phone
 
-        # الروابط
-        tracking_link = f"https://mahjoub.online/customer/thank-you/{order_id}"
-        pdf_link = f"https://mahjoub.online/invoice/{order_id}.pdf" # رابط الفاتورة المتوقع
+        # --- الرابط الصحيح للعملاء ---
+        # نستخدم المعرف الداخلي لفتح الفاتورة مباشرة للعميل
+        pdf_link = f"https://mahjoub.online/orders/invoice/{order_internal_id}"
+        tracking_link = f"https://mahjoub.online/customer/thank-you/{order_handle}"
         
-        # توقيت اليمن (GMT+3)
         yemen_time = datetime.utcnow() + timedelta(hours=3)
         full_time = yemen_time.strftime("%Y/%m/%d - %I:%M %p") 
 
@@ -45,18 +44,16 @@ def mahjoub_final_v39():
         is_paid = order.get('isPaid', False)
         pay_text = "✅ *مدفوع*" if is_paid else "❌ *غير مدفوع*"
         
-        # الملاحظات بناءً على الحالة
         extra_note = ""
         if not is_paid and not any(x in status_title for x in ["إلغاء", "ملغي"]):
-            extra_note = "\n⚠️ *يرجى تزويدنا بصورة القسيمة المالية (إيصال السداد) هنا لمتابعة تنفيذ طلبكم.*"
+            extra_note = "\n⚠️ *يرجى تزويدنا بصورة إيصال السداد هنا لمتابعة تنفيذ طلبكم.*"
 
         divider = "╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼"
         footer = "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n*نظام محجوب أونلاين | سوقك الذكي*"
 
-        # صياغة الرسالة كما طلبتها بالضبط
         msg = (
             "✨ *إشعار نظام: تم إنشاء طلب جديد* ✨\n\n"
-            f"🧾 *فاتورة رقم:* `{order_id}`\n"
+            f"🧾 *فاتورة رقم:* `{order_handle}`\n"
             f"{divider}\n"
             f"👤 *العميل:* {customer.get('name', 'عميلنا العزيز')}\n"
             f"📍 *موقع التوصيل:* {customer.get('cityName', 'اليمن')} - {customer.get('district', 'الشارع')}\n"
@@ -71,7 +68,7 @@ def mahjoub_final_v39():
             f"🕒 *توقيت الطلب:* `{full_time}`\n"
             f"🔗 *رابط التتبع:* {tracking_link}\n\n"
             f"📦 *مرفق أدناه رابط فاتورة PDF إلكترونية لطلبكم:*\n"
-            f"{pdf_link}\n"
+            f"{pdf_link}\n\n"
             f"{footer}"
         )
 
